@@ -14,8 +14,7 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 
 
-contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
-    // Mapping from token id to position in the allTokens array
+contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
 
     using Address for address;
     using SafeMath for uint256;
@@ -23,19 +22,18 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
 
     string private baseURI;
 
+    // Mapping from token id to position in the allTokens array
     uint256[] private _boxIds;
     mapping(uint256 => uint256) private _TokenIndex;
-    mapping(uint256 => bool) private _tokenExsits;
-    address private _nftAddrss;
+    mapping(uint256 => bool) private _tokenExists;
+    address private _nftAddress;
 
 
     //payment
     string public constant TOKEN_USDT = "USDT";
     mapping(string => address) private _tokenAddresses;
 
-    
     //box 
-    uint256 private _price;
     uint256 private _lastBoxid = 1;
     uint256 private _totalSupply;
 
@@ -44,13 +42,16 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
     uint256 private _endTime;
 
     //event
-    event Buy(address customer ,uint256 tokenId,uint256 price,uint256 time);
-    // event OpenBox(address account,uint256 tokenId,uint256 time);
+    event BuyBox(address customer ,uint256 tokenId,uint256 price,uint256 time);
+    event OpenBox(address customer ,uint256 tokenId);
     event StartTime(uint256 oldTime,uint256 newTime);
     event EndTime(uint256 oldTime,uint256 newTime);
 
+    // token address => price
+    mapping(address => uint256) paymentOpts;
+
     constructor(
-        address nftAdress_,
+        address nftAddress_,
         string memory name_,
         uint256 totalSupply_ ,
         string memory symbol_,
@@ -61,16 +62,17 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
         uint256 price_
         )ERC721(name_,symbol_){
 
-        require(nftAdress_ != address(0));
+        require(nftAddress_ != address(0));
         require(totalSupply_>0);
         require(startTime_ >0 && endTime_ > startTime_,"invalid time");
         _totalSupply = totalSupply_;
-        _nftAddrss = nftAdress_;
+        _nftAddress = nftAddress_;
         _startTime = startTime_;
         _endTime = endTime_;
         baseURI = string(abi.encodePacked(baseUri_,symbol_, "/"));
+
         _tokenAddresses[TOKEN_USDT] = usdtAddress_;
-        _price = price_;
+        paymentOpts[usdtAddress_] = price_;
     }
 
     function setBaseUri(string memory baseURI_)public onlyOwner{
@@ -98,23 +100,26 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
 
     // set end time
     function setEndTime(uint256 _time) public onlyOwner{
-        require(_time > _startTime, "invalid time");
+        require(_time > 0, "invalid time");
         _endTime = _time;
         emit EndTime(_endTime, _time);
     }
 
 
-    function setPrice(uint256 price_)external onlyOwner{
-        _price = price_;
+    function setPrice(string memory tokenName_,uint256 price_) public onlyOwner{
+        require(_tokenAddresses[tokenName_] != address(0),"token address is not exists");
+        address tokenAddress_ = _tokenAddresses[tokenName_];
+        paymentOpts[tokenAddress_] = price_;
     }
 
-    function setERC20Address(string calldata _tokenType,address _erc20Address) public onlyOwner {
-        require(_tokenAddresses[_tokenType] == address(0),"ERC20 Contract Address Already exist");
-        _tokenAddresses[_tokenType] = _erc20Address;
+    function setERC20AddressPrice(string calldata tokenName_,address erc20Address_,uint256 price_) public onlyOwner {
+        require(_tokenAddresses[tokenName_] == address(0),"ERC20 Contract Address Already exist");
+        _tokenAddresses[tokenName_] = erc20Address_;
+        setPrice(tokenName_,price_);
     } 
 
 
-    function buyBox(string memory tokenName) external whenNotPaused returns (uint256) {
+    function buyBox(string memory tokenName) public whenNotPaused returns (uint256) {
         //check totalsupply limit
         require(_lastBoxid<=_totalSupply,"it's sold out");
         require(block.timestamp>=_startTime && block.timestamp <= _endTime,"invalid time");
@@ -122,37 +127,40 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
         address tokenAddr = _tokenAddresses[tokenName];
         require(tokenAddr != address(0),"Wrong addresses interaction");
         require(!_msgSender().isContract(),"invalid address");
+        //get price
+        uint256 _price = paymentOpts[tokenAddr];
 
         IERC20 _erc20Address = IERC20(tokenAddr);
-    
+
         uint256 _amount = _erc20Address.allowance(msg.sender,address(this));
-        require(_amount >= _price,"Not ennogh value");
+        require(_amount >= _price,"Not enough value");
         //transfer to this
         require(_erc20Address.transferFrom(msg.sender, address(this), _price),"Not Enough tokens Transfered");
         // mint box
         _safeMint(_msgSender(),_lastBoxid);
-        emit Buy(_msgSender() ,_lastBoxid,_price,block.timestamp);
+        emit BuyBox(_msgSender() ,_lastBoxid,_price,block.timestamp);
         return _lastBoxid++;
     }
 
-    function openBox(uint256 tokenId) external whenNotPaused returns(uint256){
-        require(block.timestamp>=_startTime && block.timestamp <= _endTime,"invalid time");
+function openBox(uint256 tokenId) external whenNotPaused returns(uint256){
+        // require(block.timestamp>=_startTime && block.timestamp <= _endTime,"invalid time");
         //require tokenId
         require(_exists(tokenId),"box tokenId is not exists");
         //require tokenid owner msgSender()
-        require(ownerOf(tokenId)==_msgSender());
+        require(ownerOf(tokenId)==_msgSender(),"is not owner");
         // get current nft amount
         uint256 nfts = _boxIds.length;
+        require(nfts>0,"not enough nft");
         // random nft TokenId
-        uint256 nftIndex = _random() % nfts;
-
+        uint256 nftIndex = _random(tokenId , nfts);
         uint256 nftTokenId = tokenByIndex(nftIndex);
         //burn box tokenId
         _burn(tokenId);
         // transfer nft to customer
-        IERC721(_nftAddrss).safeTransferFrom(address(this),msg.sender,nftTokenId);
-        _tokenExsits[nftTokenId] = false;
+        IERC721(_nftAddress).safeTransferFrom(address(this),msg.sender,nftTokenId);
+        _tokenExists[nftTokenId] = false;
         _removeNftFromEnumeration(nftTokenId);
+        emit OpenBox(_msgSender() ,nftTokenId);
         return nftTokenId;
     } 
 
@@ -163,9 +171,15 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
         address tokenAddr = _tokenAddresses[tokenName_];
         require(tokenAddr != address(0),"token not support");
         uint256 amount = IERC20(tokenAddr).balanceOf(address(this));
-        if (amount >0){
-            IERC20(tokenAddr).transfer(_msgSender(), amount);
-        }   
+        require(amount > 0,"not enough balance");
+        IERC20(tokenAddr).transfer(_msgSender(), amount);
+        
+    }
+
+    function getPrice(string memory tokenName)public view returns(uint256){
+        address tokenAddr = _tokenAddresses[tokenName];
+        require(tokenAddr != address(0),"token not support");
+        return paymentOpts[tokenAddr];
     }
 
     function soldOut()public view returns(bool){
@@ -178,9 +192,9 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
         uint256 tokenId,
         bytes memory
     ) public virtual override returns (bytes4) {
-        require(IERC721(_nftAddrss).ownerOf(tokenId) == address(this),"Not belong this address");
-        require(!_exists(tokenId),"This id is already exist");
-        _tokenExsits[tokenId] = true;
+        require(IERC721(_nftAddress).ownerOf(tokenId) == address(this),"Not belong this address");
+        require(!_NftExists(tokenId),"This id is already exist");
+        _tokenExists[tokenId] = true;
         _addNftToEnumeration(tokenId);
         return this.onERC721Received.selector;
     }
@@ -216,48 +230,55 @@ contract lowLevelBox is ERC721,IERC721Receiver,Ownable,Pausable {
 
     // tokenid exists
     function _NftExists(uint256 tokenId) private view returns(bool) {
-        return _tokenExsits[tokenId];
+        return _tokenExists[tokenId];
     }
 
     function RemainNfts() public view returns (uint256[] memory) {
         return _boxIds;
     }
 
-    function _transferBackToNft(uint256 tokenId) private onlyOwner {
+    function _transferBackToNft(uint256 tokenId) public onlyOwner {
         require(_NftExists(tokenId),"this tokenId don't exist");
-        require(IERC721(_nftAddrss).ownerOf(tokenId) == address(this),"Not belong this address");
-        IERC721(_nftAddrss).safeTransferFrom(address(this),_nftAddrss,tokenId);
-        //
-        _tokenExsits[tokenId] = false;
+        require(IERC721(_nftAddress).ownerOf(tokenId) == address(this),"Not belong this address");
+        IERC721(_nftAddress).safeTransferFrom(address(this),_nftAddress,tokenId);
+        _tokenExists[tokenId] = false;
         _removeNftFromEnumeration(tokenId);
     }
 
     function transferBatchToNft() public onlyOwner {
         require(block.timestamp > _endTime);
-        for (uint256 i = 0; i < _boxIds.length; ++i) {
+        for (uint256 i = 0; i < _boxIds.length; i++) {
             uint256 _tokenId = tokenByIndex(i);
             _transferBackToNft(_tokenId);
         }
-
     }
 
-    /**
-     * @dev 
-     */
-    function tokenByIndex(uint256 index) public view returns (uint256) {
+
+    function tokenByIndex(uint256 index) private view returns (uint256) {
         require(index < _boxIds.length, "ERC721Enumerable: global index out of bounds");
         return _boxIds[index];
     }
 
     // random func
-    function _random() private view returns (uint256 rand) {
-        uint256 blocknumber = block.number;
-        uint256 random_gap = uint256(keccak256(abi.encodePacked(blockhash(blocknumber-1), msg.sender))) % 255;
-        uint256 random_block = blocknumber - 1 - random_gap;
-        bytes32 sha = keccak256(abi.encodePacked(blockhash(random_block),
-        msg.sender,
-        block.coinbase,
-        block.difficulty));
-        return uint256(sha);
+    function _random(uint256 _seed, uint256 _modulus)
+        private
+        view
+        returns (uint256)
+    {
+    require(_modulus>0,"mod num invalid");
+        uint256 rand = uint256(
+            keccak256(
+                abi.encodePacked(
+                    _seed,
+                    block.timestamp,
+                    block.difficulty,
+                    blockhash(block.number),
+                    block.coinbase,
+                    msg.sender
+                )
+            )
+        );
+        return rand % _modulus;
     }
+
 }
