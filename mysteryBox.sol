@@ -30,7 +30,7 @@ contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
 
 
     //payment
-    string public constant TOKEN_USDT = "USDT";
+    string public constant TOKEN_BUSD = "BUSD";
     mapping(string => address) private _tokenAddresses;
 
     //box 
@@ -42,8 +42,8 @@ contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
     uint256 private _endTime;
 
     //event
-    event BuyBox(address customer ,uint256 tokenId,uint256 price,uint256 time);
-    event OpenBox(address customer ,uint256 tokenId);
+    event BuyBox(address indexed customer ,uint256 indexed tokenId,uint256 indexed price,uint256 time);
+    event OpenBox(address indexed customer ,uint256 indexed tokenId);
     event StartTime(uint256 oldTime,uint256 newTime);
     event EndTime(uint256 oldTime,uint256 newTime);
 
@@ -56,7 +56,7 @@ contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
         uint256 totalSupply_ ,
         string memory symbol_,
         string memory baseUri_,
-        address usdtAddress_,
+        address tokenAddress_,
         uint256 startTime_,
         uint256 endTime_,
         uint256 price_
@@ -71,8 +71,8 @@ contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
         _endTime = endTime_;
         baseURI = string(abi.encodePacked(baseUri_,symbol_, "/"));
 
-        _tokenAddresses[TOKEN_USDT] = usdtAddress_;
-        paymentOpts[usdtAddress_] = price_;
+        _tokenAddresses[TOKEN_BUSD] = tokenAddress_;
+        paymentOpts[tokenAddress_] = price_;
     }
 
     function setBaseUri(string memory baseURI_)public onlyOwner{
@@ -132,8 +132,6 @@ contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
 
         IERC20 _erc20Address = IERC20(tokenAddr);
 
-        uint256 _amount = _erc20Address.allowance(msg.sender,address(this));
-        require(_amount >= _price,"Not enough value");
         //transfer to this
         require(_erc20Address.transferFrom(msg.sender, address(this), _price),"Not Enough tokens Transfered");
         // mint box
@@ -141,6 +139,21 @@ contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
         emit BuyBox(_msgSender() ,_lastBoxid,_price,block.timestamp);
         return _lastBoxid++;
     }
+
+    function mint(address to)public onlyOwner{
+        _safeMint(to,_lastBoxid);
+        emit BuyBox(_msgSender() ,_lastBoxid,0,block.timestamp);
+        _lastBoxid++;
+    }
+
+    function RemainMysteryBox()public view returns(uint256){
+        (bool ok , uint256 remain) = _totalSupply.trySub(_lastBoxid);
+        require(ok,"invalid argument");
+        (bool ok2 , uint256 remain2) = remain.tryAdd(1);
+        require(ok2,"invalid argument");
+        return remain2;
+    }
+
 
 function openBox(uint256 tokenId) external whenNotPaused returns(uint256){
         // require(block.timestamp>=_startTime && block.timestamp <= _endTime,"invalid time");

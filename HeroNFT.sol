@@ -233,7 +233,7 @@ contract HeroNFT is NFTMock,IERC721Receiver {
         string calldata _uri,
         string calldata _rarity,
         string calldata _class
-    ) public canMintHero(_rarity, _class) onlyOwner {
+    ) public onlyOwner {
         if(_exists(_tokenId)) {
             require(ownerOf(_tokenId) == address(this),"Not belong this address");
             this.safeTransferFrom(address(this),_to,_tokenId);
