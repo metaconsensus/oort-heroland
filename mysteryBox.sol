@@ -140,18 +140,23 @@ contract mysteryBox is ERC721,IERC721Receiver,Ownable,Pausable {
         return _lastBoxid++;
     }
 
-    function mint(address to)public onlyOwner{
+    function buyBox(address to)public onlyOwner{
         _safeMint(to,_lastBoxid);
         emit BuyBox(_msgSender() ,_lastBoxid,0,block.timestamp);
         _lastBoxid++;
     }
 
     function RemainMysteryBox()public view returns(uint256){
-        (bool ok , uint256 remain) = _totalSupply.trySub(_lastBoxid);
-        require(ok,"invalid argument");
-        (bool ok2 , uint256 remain2) = remain.tryAdd(1);
-        require(ok2,"invalid argument");
-        return remain2;
+        if(soldOut()) {
+            return 0;
+        }else{
+            (bool ok , uint256 remain) = _totalSupply.trySub(_lastBoxid);
+            require(ok,"invalid argument");
+            (bool ok2 , uint256 remain2) = remain.tryAdd(1);
+            require(ok2,"invalid argument");
+            return remain2;
+        } 
+            
     }
 
 
@@ -180,12 +185,13 @@ function openBox(uint256 tokenId) external whenNotPaused returns(uint256){
 
 
 
-    function claimPayment(string memory tokenName_)external onlyOwner {
+    function claimPayment(string memory tokenName_,address payee)external onlyOwner {
         address tokenAddr = _tokenAddresses[tokenName_];
         require(tokenAddr != address(0),"token not support");
+        require(payee != address(0),"payee is zero address");
         uint256 amount = IERC20(tokenAddr).balanceOf(address(this));
         require(amount > 0,"not enough balance");
-        IERC20(tokenAddr).transfer(_msgSender(), amount);
+        IERC20(tokenAddr).transfer(payee, amount);
         
     }
 
@@ -196,7 +202,9 @@ function openBox(uint256 tokenId) external whenNotPaused returns(uint256){
     }
 
     function soldOut()public view returns(bool){
-        return _lastBoxid >= _totalSupply;
+        (bool ok,uint256 amount) =  _lastBoxid.trySub(1);
+        require(ok,"invalid param");
+        return amount == _totalSupply;
     }
 
      function onERC721Received(
